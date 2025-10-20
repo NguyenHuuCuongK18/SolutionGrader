@@ -32,9 +32,9 @@ namespace SolutionGrader.Services
 
             using var package = new ExcelPackage(new FileInfo(filePath));
 
-            LoadInputSheet(package.Workbook.Worksheets["Input_Client"], data);
-            LoadClientSheet(package.Workbook.Worksheets["Output_Client"], data);
-            LoadServerSheet(package.Workbook.Worksheets["Output_Server"], data);
+            LoadInputSheet(package.Workbook.Worksheets["InputClients"], data);
+            LoadClientSheet(package.Workbook.Worksheets["OutputClients"], data);
+            LoadServerSheet(package.Workbook.Worksheets["OutputServers"], data);
 
             return data;
         }
