@@ -1,25 +1,26 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Security.RightsManagement;
 using System.Text;
 using System.Threading.Tasks;
-using System.Windows;
 using SolutionGrader.Legacy.Service;
-using SolutionGrader.Legacy.Views;
 
-namespace SolutionGrader.Legacy.ServiceExcute  
+namespace SolutionGrader.Legacy.ServiceExcute
 {
     public class ExecutableManager
     {
         private static readonly Lazy<ExecutableManager> _instance =
             new(() => new ExecutableManager());
         public static ExecutableManager Instance => _instance.Value;
-        private Process? _clientProcess;
-        private Process? _serverProcess;
+
+        public Process? _clientProcess;
+        public Process? _serverProcess;
 
         public event Action<string>? ClientOutputReceived;
         public event Action<string>? ServerOutputReceived;
+
+        public bool IsServerRunning => _serverProcess != null && !_serverProcess.HasExited;
+        public bool IsClientRunning => _clientProcess != null && !_clientProcess.HasExited;
 
         private readonly string _debugFolder =
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "process_logs");
@@ -28,38 +29,7 @@ namespace SolutionGrader.Legacy.ServiceExcute
         {
             Directory.CreateDirectory(_debugFolder);
         }
-        //load list ignore
-        //public void InitializeIgnoreList(string excelPath)
-        //{
-        //    try
-        //    {
-        //        var file = Path.Combine("D:\\CSharp_Project\\TestKitGenerator", "Ignore.xlsx");
-        //        _ignoreTexts = IgnoreListLoader.IgnoreLoader(file);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        MessageBox.Show($"Không thể load file ignore: {ex.Message}");
-        //        _ignoreTexts = new HashSet<string>();
-        //    }
-        //}
-        // method check isIgnore
-        //private bool ShouldIgnore(string line)
-        //{
-        //    if (_ignoreTexts == null || _ignoreTexts.Count == 0)
-        //        return false;
 
-        //    foreach (var ignore in _ignoreTexts)
-        //    {
-        //        if (line.Contains(ignore, StringComparison.OrdinalIgnoreCase))
-        //            return true;
-        //    }
-        //    return false;
-        //}
-
-
-        /// <summary>
-        /// Khởi tạo sẵn thông tin process mà chưa chạy.
-        /// </summary>
         public void Init(string clientPath, string serverPath)
         {
             _clientProcess = CreateProcess(clientPath, msg =>
@@ -97,37 +67,25 @@ namespace SolutionGrader.Legacy.ServiceExcute
             };
 
             process.Exited += (s, e) => onOutput($"[{role}] exited.");
-
             return process;
         }
 
-        #region Start/Stop
+        #region Start/Stop (foreground-less)
 
-        /// <summary>
-        /// Chạy server trước để middleware có thể kết nối.
-        /// </summary>
         public void StartServer()
         {
             if (_serverProcess == null)
                 throw new InvalidOperationException("Server process not initialized.");
-
             StartProcessAndMonitor(_serverProcess, msg => ServerOutputReceived?.Invoke(msg), "server.log");
         }
 
-        /// <summary>
-        /// Chạy client sau khi middleware đã sẵn sàng.
-        /// </summary>
         public void StartClient()
         {
             if (_clientProcess == null)
                 throw new InvalidOperationException("Client process not initialized.");
-
             StartProcessAndMonitor(_clientProcess, msg => ClientOutputReceived?.Invoke(msg), "client.log");
         }
 
-        /// <summary>
-        /// Trước đây là StartBoth, giữ lại nếu cần chạy song song.
-        /// </summary>
         public void StartBoth()
         {
             StartServer();
@@ -138,36 +96,27 @@ namespace SolutionGrader.Legacy.ServiceExcute
         {
             process.Start();
 
-            // ===== OUTPUT (stdout) =====
+            // ===== STDOUT =====
             Task.Run(async () =>
             {
                 var reader = process.StandardOutput;
                 char[] buffer = new char[1024];
                 int read;
 
-                var sb = new StringBuilder();      // lưu partial line giữa các chunk
+                var sb = new StringBuilder();
                 object sbLock = new object();
-                CancellationTokenSource pendingFlushCts = null;
-
-                const int DEBOUNCE_MS = 100; // thời gian chờ trước khi flush phần partial (tùy chỉnh)
+                System.Threading.CancellationTokenSource? pendingFlushCts = null;
+                const int DEBOUNCE_MS = 100;
 
                 void ScheduleFlushPartial()
                 {
-                    // Cancel + dispose cts trước đó (nếu có)
-                    var prev = Interlocked.Exchange(ref pendingFlushCts, new CancellationTokenSource());
-                    if (prev != null)
-                    {
-                        try { prev.Cancel(); prev.Dispose(); }
-                        catch { }
-                    }
+                    var prev = System.Threading.Interlocked.Exchange(ref pendingFlushCts, new System.Threading.CancellationTokenSource());
+                    if (prev != null) { try { prev.Cancel(); prev.Dispose(); } catch { } }
 
                     var cts = pendingFlushCts;
                     _ = Task.Run(async () =>
                     {
-                        try
-                        {
-                            await Task.Delay(DEBOUNCE_MS, cts.Token);
-                        }
+                        try { await Task.Delay(DEBOUNCE_MS, cts!.Token); }
                         catch (TaskCanceledException) { return; }
 
                         string partial;
@@ -178,7 +127,6 @@ namespace SolutionGrader.Legacy.ServiceExcute
                             sb.Clear();
                         }
 
-                        // flush partial (đã có pause -> coi như hoàn chỉnh)
                         onOutput(partial);
                         AppendDebugFile(logFile, partial);
                     });
@@ -189,30 +137,18 @@ namespace SolutionGrader.Legacy.ServiceExcute
                     for (int i = 0; i < read; i++)
                     {
                         char c = buffer[i];
-
-                        // coi cả '\r' và '\n' là terminator
                         if (c == '\r' || c == '\n')
                         {
                             string line;
-                            lock (sbLock)
-                            {
-                                line = sb.ToString();
-                                sb.Clear();
-                            }
-
+                            lock (sbLock) { line = sb.ToString(); sb.Clear(); }
                             if (!string.IsNullOrEmpty(line))
                             {
                                 onOutput(line);
                                 AppendDebugFile(logFile, line);
                             }
 
-                            // Nếu có timer flush partial đang chờ, huỷ nó (bởi ta vừa flush)
-                            var prev = Interlocked.Exchange(ref pendingFlushCts, null);
-                            if (prev != null)
-                            {
-                                try { prev.Cancel(); prev.Dispose(); }
-                                catch { }
-                            }
+                            var prev = System.Threading.Interlocked.Exchange(ref pendingFlushCts, null);
+                            if (prev != null) { try { prev.Cancel(); prev.Dispose(); } catch { } }
                         }
                         else
                         {
@@ -220,22 +156,16 @@ namespace SolutionGrader.Legacy.ServiceExcute
                         }
                     }
 
-                    // Nếu còn partial (không có newline trong chunk), schedule một flush sau debounce
                     bool hasPartial;
                     lock (sbLock) { hasPartial = sb.Length > 0; }
                     if (hasPartial) ScheduleFlushPartial();
                 }
 
-                // Khi stream kết thúc: huỷ timer và flush phần còn lại ngay
-                var finalCts = Interlocked.Exchange(ref pendingFlushCts, null);
+                var finalCts = System.Threading.Interlocked.Exchange(ref pendingFlushCts, null);
                 if (finalCts != null) { try { finalCts.Cancel(); finalCts.Dispose(); } catch { } }
 
-                string last;
-                lock (sbLock)
-                {
-                    last = sb.Length > 0 ? sb.ToString() : null;
-                    sb.Clear();
-                }
+                string? last;
+                lock (sbLock) { last = sb.Length > 0 ? sb.ToString() : null; sb.Clear(); }
                 if (!string.IsNullOrEmpty(last))
                 {
                     onOutput(last);
@@ -243,7 +173,7 @@ namespace SolutionGrader.Legacy.ServiceExcute
                 }
             });
 
-            // ===== ERROR (stderr) =====
+            // ===== STDERR =====
             Task.Run(async () =>
             {
                 var errReader = process.StandardError;
@@ -272,7 +202,6 @@ namespace SolutionGrader.Legacy.ServiceExcute
                         }
                     }
 
-                    // error thường ngắn — flush partial ngay
                     if (errSb.Length > 0)
                     {
                         var partial = errSb.ToString();
@@ -319,13 +248,13 @@ namespace SolutionGrader.Legacy.ServiceExcute
             }
             finally
             {
-                process.Dispose();
+                try { process.Dispose(); } catch { }
                 process = null;
             }
         }
         #endregion
 
-        #region Input/Output
+        #region Input/Output helpers
 
         public void SendClientInput(string input)
         {
@@ -344,124 +273,33 @@ namespace SolutionGrader.Legacy.ServiceExcute
             }
             catch { }
         }
-        #region StopAllAsync
+
+        #endregion
+
+        #region Async stop API (silent, no UI)
+
         public async Task StopAllAsync()
         {
-            ProgressDialog? dialog = null;
-            try
-            {
-                // Hiển thị loading dialog không chặn
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog = new ProgressDialog("Đang dừng tất cả tiến trình...");
-                    dialog.Owner = Application.Current.MainWindow;
-                    dialog.Show(); // Không dùng ShowDialog -> không chặn luồng
-                });
+            var stopClientTask = StopProcessAsync(_clientProcess, "Client");
+            var stopServerTask = StopProcessAsync(_serverProcess, "Server");
 
-                // Dừng tiến trình song song
-                var stopClientTask = StopProcessAsync(_clientProcess, "Client");
-                var stopServerTask = StopProcessAsync(_serverProcess, "Server");
+            await Task.WhenAll(stopClientTask, stopServerTask);
 
-                await Task.WhenAll(stopClientTask, stopServerTask);
-
-                _clientProcess = null;
-                _serverProcess = null;
-
-                // Đóng dialog sau khi dừng xong
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog?.Close();
-                    MessageBox.Show("Tất cả tiến trình đã được dừng thành công.",
-                        "Thông báo", MessageBoxButton.OK, MessageBoxImage.Information);
-                });
-            }
-            catch (Exception ex)
-            {
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog?.Close();
-                    MessageBox.Show($"[StopAllAsync ERR] {ex.Message}",
-                        "Lỗi", MessageBoxButton.OK, MessageBoxImage.Error);
-                });
-            }
+            _clientProcess = null;
+            _serverProcess = null;
         }
-        #endregion
 
-        #region StopClientAsync
         public async Task StopClientAsync()
         {
-            ProgressDialog? dialog = null;
-            try
-            {
-                // Hiển thị loading dialog không chặn
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog = new ProgressDialog("Đang dừng tiến trình client...");
-                    dialog.Owner = Application.Current.MainWindow;
-                    dialog.Show(); // Không dùng ShowDialog -> không chặn luồng
-                });
-
-                await StopProcessAsync(_clientProcess, "Client");
-
-                _clientProcess = null;
-
-                // Đóng dialog sau khi dừng xong
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog?.Close();
-                    MessageBox.Show("Tiến trình client đã được dừng thành công.",
-                        "Thông báo", MessageBoxButton.OK, MessageBoxImage.Information);
-                });
-            }
-            catch (Exception ex)
-            {
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog?.Close();
-                    MessageBox.Show($"[StopClientAsync ERR] {ex.Message}",
-                        "Lỗi", MessageBoxButton.OK, MessageBoxImage.Error);
-                });
-            }
+            await StopProcessAsync(_clientProcess, "Client");
+            _clientProcess = null;
         }
-        #endregion
 
-        #region StopServerAsync
         public async Task StopServerAsync()
         {
-            ProgressDialog? dialog = null;
-            try
-            {
-                // Hiển thị loading dialog không chặn
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog = new ProgressDialog("Đang dừng tiến trình server...");
-                    dialog.Owner = Application.Current.MainWindow;
-                    dialog.Show(); // Không dùng ShowDialog -> không chặn luồng
-                });
-
-                await StopProcessAsync(_serverProcess, "Server");
-
-                _serverProcess = null;
-
-                // Đóng dialog sau khi dừng xong
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog?.Close();
-                    MessageBox.Show("Tiến trình server đã được dừng thành công.",
-                        "Thông báo", MessageBoxButton.OK, MessageBoxImage.Information);
-                });
-            }
-            catch (Exception ex)
-            {
-                await Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    dialog?.Close();
-                    MessageBox.Show($"[StopServerAsync ERR] {ex.Message}",
-                        "Lỗi", MessageBoxButton.OK, MessageBoxImage.Error);
-                });
-            }
+            await StopProcessAsync(_serverProcess, "Server");
+            _serverProcess = null;
         }
-        #endregion
 
         private async Task StopProcessAsync(Process? process, string role)
         {
@@ -482,35 +320,31 @@ namespace SolutionGrader.Legacy.ServiceExcute
                 try { process.Dispose(); } catch { }
             }
 
-            // Chuyển sang một luồng nền để thực thi lệnh taskkill mà không làm treo UI.
             await Task.Run(() =>
             {
                 try
                 {
-                    // Tạo một process mới chỉ để chạy lệnh taskkill
-                    using (var taskKillProcess = new Process())
-                    {
-                        var startInfo = taskKillProcess.StartInfo;
-                        startInfo.FileName = "taskkill";
-                        // /F: Buộc dừng (Force)
-                        // /T: Dừng cả các process con (Tree)
-                        // /PID: Dừng theo Process ID
-                        startInfo.Arguments = $"/F /PID {processId} /T";
-                        startInfo.UseShellExecute = false;
-                        startInfo.CreateNoWindow = true; // Chạy ẩn, không hiện cửa sổ cmd
+                    using var taskKillProcess = new Process();
+                    var startInfo = taskKillProcess.StartInfo;
+                    startInfo.FileName = "taskkill";
+                    startInfo.Arguments = $"/F /PID {processId} /T";
+                    startInfo.UseShellExecute = false;
+                    startInfo.CreateNoWindow = true;
 
-                        taskKillProcess.Start();
-                        taskKillProcess.WaitForExit(3000); 
+                    taskKillProcess.Start();
+                    taskKillProcess.WaitForExit(3000);
 
-                        AppendDebugFile($"{role.ToLower()}.log", $"[{role}] Termination command sent to process ID {processId} via taskkill.");
-                    }
+                    AppendDebugFile($"{role.ToLower()}.log",
+                        $"[{role}] Termination command sent to process ID {processId} via taskkill.");
                 }
                 catch (Exception ex)
                 {
-                    AppendDebugFile($"{role.ToLower()}.log", $"[StopProcess ERR] Exception during taskkill: {ex}");
+                    AppendDebugFile($"{role.ToLower()}.log",
+                        $"[StopProcess ERR] Exception during taskkill: {ex}");
                 }
             });
         }
+
         #endregion
     }
 }

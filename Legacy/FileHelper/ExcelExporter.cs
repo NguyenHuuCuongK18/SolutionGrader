@@ -2,11 +2,10 @@
 using OfficeOpenXml.Style;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Windows;
+using SolutionGrader.Services;
 
 namespace SolutionGrader.Legacy.FileHelper
 {
@@ -14,7 +13,7 @@ namespace SolutionGrader.Legacy.FileHelper
     {
         public ExcelExporter()
         {
-            ExcelPackage.License.SetNonCommercialPersonal("AGS FPT");
+            ExcelPackage.License.SetNonCommercialPersonal("FPT AGS");
         }
 
         public void ExportToExcelParams(string filePath, params (string SheetName, ICollection<object> Data)[] sheetsData)
@@ -28,9 +27,8 @@ namespace SolutionGrader.Legacy.FileHelper
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
-                ExcelPackage.License.SetNonCommercialPersonal("AGS FPT");
-
                 using var package = new ExcelPackage();
+                bool anyWorksheetAdded = false;
 
                 foreach (var (sheetName, data) in sheetsData)
                 {
@@ -39,91 +37,60 @@ namespace SolutionGrader.Legacy.FileHelper
                     var firstItem = data.FirstOrDefault(d => d != null);
                     if (firstItem == null) continue;
 
-                    var worksheet = package.Workbook.Worksheets.Add(sheetName);
+                    var ws = package.Workbook.Worksheets.Add(
+                        string.IsNullOrWhiteSpace(sheetName) ? "Sheet" + (package.Workbook.Worksheets.Count + 1) : sheetName);
+                    anyWorksheetAdded = true;
 
-                    var properties = firstItem.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                    var props = firstItem.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
-                    for (int i = 0; i < properties.Length; i++)
+                    // Header
+                    for (int i = 0; i < props.Length; i++)
+                        ws.Cells[1, i + 1].Value = props[i].Name;
+
+                    using (var header = ws.Cells[1, 1, 1, props.Length])
+                        header.Style.Font.Bold = true;
+
+                    // Rows
+                    int row = 2;
+                    foreach (var item in data)
                     {
-                        worksheet.Cells[1, i + 1].Value = properties[i].Name;
+                        if (item == null) continue;
+                        for (int col = 0; col < props.Length; col++)
+                            ws.Cells[row, col + 1].Value = props[col].GetValue(item);
+                        row++;
                     }
 
-                    using (var headerRange = worksheet.Cells[1, 1, 1, properties.Length])
+                    // Column sizing
+                    const double MAXW = 60, MINW = 10;
+                    for (int i = 1; i <= props.Length; i++)
                     {
-                        headerRange.Style.Font.Bold = true;
+                        var col = ws.Column(i);
+                        col.AutoFit();
+                        if (col.Width > MAXW) col.Width = MAXW;
+                        if (col.Width < MINW) col.Width = MINW;
+                        col.Style.WrapText = true;
                     }
 
-                    if (data.Any())
-                    {
-                        int currentRow = 2;
-                        foreach (var item in data)
-                        {
-                            if (item == null) continue;
-                            for (int i = 0; i < properties.Length; i++)
-                            {
-                                var value = properties[i].GetValue(item);
-                                worksheet.Cells[currentRow, i + 1].Value = value;
-                            }
-                            currentRow++;
-                        }
-                    }
+                    if (ws.Dimension != null)
+                        ws.Cells[ws.Dimension.Address].Style.VerticalAlignment = ExcelVerticalAlignment.Top;
+                }
 
-                    const double MAX_COLUMN_WIDTH = 60;
-                    const double MIN_COLUMN_WIDTH = 10;
-
-                    for (int i = 1; i <= properties.Length; i++)
-                    {
-                        var column = worksheet.Column(i);
-                        var propertyName = properties[i - 1].Name;
-                        column.Style.WrapText = true;
-                        if ((propertyName.Equals("DataResponse", StringComparison.OrdinalIgnoreCase))
-                            || (propertyName.Equals("Output", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            column.Style.WrapText = true;
-                            column.Width = MAX_COLUMN_WIDTH;
-                        }
-                        else if ((propertyName.Equals("DataTypeMiddleWare", StringComparison.OrdinalIgnoreCase)) ||
-                                 (propertyName.Equals("DataRequest", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            column.Style.WrapText = true;
-                            column.Width = MIN_COLUMN_WIDTH * 2;
-                        }
-                        else
-                        {
-                            column.AutoFit();
-                        }
-
-                        if (column.Width > MAX_COLUMN_WIDTH) column.Width = MAX_COLUMN_WIDTH;
-                        if (column.Width < MIN_COLUMN_WIDTH) column.Width = MIN_COLUMN_WIDTH;
-                    }
-
-                    if (worksheet.Dimension != null)
-                    {
-                        worksheet.Cells[worksheet.Dimension.Address].Style.VerticalAlignment = ExcelVerticalAlignment.Top;
-                    }
+                // Nếu không có sheet nào được add, tạo sheet Info để workbook hợp lệ
+                if (!anyWorksheetAdded)
+                {
+                    var info = package.Workbook.Worksheets.Add("Info");
+                    info.Cells[1, 1].Value = "No data was available at export time.";
+                    info.Cells[2, 1].Value = "A placeholder sheet is added to keep the workbook valid.";
                 }
 
                 package.SaveAs(new FileInfo(filePath));
-
-                MessageBox.Show(
-                    $"Xuất file Excel thành công!\nĐường dẫn: {filePath}",
-                    "Thành công",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
+                GraderLogger.Info($"Excel exported: {filePath}");
             }
             catch (Exception ex)
             {
-                try
-                {
-                    string logPath = Path.Combine(Path.GetDirectoryName(filePath) ?? AppDomain.CurrentDomain.BaseDirectory, "ExportLog.txt");
-                    File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Lỗi khi export Excel:\n{ex}\n\n");
-                    MessageBox.Show($"Xuất Excel thất bại!\nChi tiết lỗi đã được ghi tại:\n{logPath}", "Lỗi Xuất File", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-                catch
-                {
-                    MessageBox.Show($"Xuất Excel thất bại: {ex.Message}", "Lỗi Xuất File", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                // KHÔNG bật dialog — chỉ log, để tầng gọi tự quyết định
+                GraderLogger.Error($"Export Excel failed for {filePath}", ex);
+                throw;
             }
         }
     }

@@ -9,9 +9,11 @@ namespace SolutionGrader.Models
         private string _serverPath = string.Empty;
         private string _clientAppSettingsPath = string.Empty;
         private string _serverAppSettingsPath = string.Empty;
-        private string _testCaseFilePath = string.Empty;
+        private string _suitePath = string.Empty;
         private string _ignoreFilePath = string.Empty;
         private string _protocol = "HTTP";
+        private string _databaseScriptPath = string.Empty;
+        private string _resultsDirectory = string.Empty;
 
         public string ClientPath
         {
@@ -37,10 +39,10 @@ namespace SolutionGrader.Models
             set => SetProperty(ref _serverAppSettingsPath, value);
         }
 
-        public string TestCaseFilePath
+        public string SuitePath
         {
-            get => _testCaseFilePath;
-            set => SetProperty(ref _testCaseFilePath, value);
+            get => _suitePath;
+            set => SetProperty(ref _suitePath, value);
         }
 
         public string IgnoreFilePath
@@ -54,6 +56,18 @@ namespace SolutionGrader.Models
             get => _protocol;
             set => SetProperty(ref _protocol, value);
         }
+        public string DatabaseScriptPath
+        {
+            get => _databaseScriptPath;
+            set => SetProperty(ref _databaseScriptPath, value);
+        }
+
+        public string ResultsDirectory
+        {
+            get => _resultsDirectory;
+            set => SetProperty(ref _resultsDirectory, value);
+        }
+
 
         public event PropertyChangedEventHandler? PropertyChanged;
 

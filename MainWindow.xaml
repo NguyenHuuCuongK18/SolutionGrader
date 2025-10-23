@@ -27,6 +27,8 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <Label Content="Client Executable:" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center"/>
@@ -45,19 +47,26 @@
                 <TextBox Text="{Binding Config.ServerAppSettingsPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Row="3" Grid.Column="1" Margin="5"/>
                 <Button Content="Browse..." Command="{Binding BrowseServerAppSettingsCommand}" Grid.Row="3" Grid.Column="2" Margin="5" Padding="10,2"/>
 
-                <Label Content="Test Case File:" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center"/>
-                <TextBox Text="{Binding Config.TestCaseFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Row="4" Grid.Column="1" Margin="5"/>
-                <Button Content="Browse..." Command="{Binding BrowseTestCaseFileCommand}" Grid.Row="4" Grid.Column="2" Margin="5" Padding="10,2"/>
+                <Label Content="Test Suite:" Grid.Row="4" Grid.Column="0" VerticalAlignment="Center"/>
+                <TextBox Text="{Binding Config.SuitePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Row="4" Grid.Column="1" Margin="5"/>
+                <StackPanel Grid.Row="4" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button Content="File..." Command="{Binding BrowseSuiteFileCommand}" Margin="5" Padding="10,2"/>
+                    <Button Content="Folder..." Command="{Binding BrowseSuiteFolderCommand}" Margin="5" Padding="10,2"/>
+                </StackPanel>
 
                 <Label Content="Ignore File:" Grid.Row="5" Grid.Column="0" VerticalAlignment="Center"/>
                 <TextBox Text="{Binding Config.IgnoreFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Row="5" Grid.Column="1" Margin="5"/>
                 <Button Content="Browse..." Command="{Binding BrowseIgnoreFileCommand}" Grid.Row="5" Grid.Column="2" Margin="5" Padding="10,2"/>
+                <Label Content="Database Script:" Grid.Row="6" Grid.Column="0" VerticalAlignment="Center"/>
+                <TextBox Text="{Binding Config.DatabaseScriptPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Row="6" Grid.Column="1" Margin="5"/>
+                <Button Content="Browse..." Command="{Binding BrowseDatabaseScriptCommand}" Grid.Row="6" Grid.Column="2" Margin="5" Padding="10,2"/>
 
-                <Label Content="Protocol:" Grid.Row="6" Grid.Column="0" VerticalAlignment="Center"/>
-                <ComboBox Grid.Row="6" Grid.Column="1" Margin="5" SelectedValue="{Binding Config.Protocol, Mode=TwoWay}" SelectedValuePath="Content">
-                    <ComboBoxItem Content="HTTP"/>
-                    <ComboBoxItem Content="TCP"/>
-                </ComboBox>
+                <Label Content="Results Directory:" Grid.Row="7" Grid.Column="0" VerticalAlignment="Center"/>
+                <TextBox Text="{Binding Config.ResultsDirectory, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Row="7" Grid.Column="1" Margin="5"/>
+                <Button Content="Browse..." Command="{Binding BrowseResultsDirectoryCommand}" Grid.Row="7" Grid.Column="2" Margin="5" Padding="10,2"/>
+
+                <Label Content="Protocol:" Grid.Row="8" Grid.Column="0" VerticalAlignment="Center"/>
+                <TextBox Text="{Binding Config.Protocol}" Grid.Row="8" Grid.Column="1" Margin="5" IsReadOnly="True"/>
             </Grid>
         </GroupBox>
 

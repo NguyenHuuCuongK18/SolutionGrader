@@ -8,13 +8,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
-using Microsoft.Win32;
+// NOTE: do NOT import Microsoft.Win32 or System.Windows.Forms here without qualification
 using SolutionGrader.Commands;
 using SolutionGrader.Models;
 using SolutionGrader.Recorder;
 using SolutionGrader.Services;
 using SolutionGrader.Legacy.Model;
 using SolutionGrader.Legacy.Service;
+using Forms = System.Windows.Forms;
 
 namespace SolutionGrader.ViewModels
 {
@@ -37,9 +38,11 @@ namespace SolutionGrader.ViewModels
             BrowseServerCommand = new RelayCommand(BrowseServer);
             BrowseClientAppSettingsCommand = new RelayCommand(() => BrowseJson(path => Config.ClientAppSettingsPath = path));
             BrowseServerAppSettingsCommand = new RelayCommand(() => BrowseJson(path => Config.ServerAppSettingsPath = path));
-            BrowseTestCaseFileCommand = new RelayCommand(() => BrowseExcel(path => Config.TestCaseFilePath = path));
+            BrowseSuiteFileCommand = new RelayCommand(() => BrowseExcel(path => Config.SuitePath = path));
+            BrowseSuiteFolderCommand = new RelayCommand(BrowseSuiteFolder);
             BrowseIgnoreFileCommand = new RelayCommand(() => BrowseExcel(path => Config.IgnoreFilePath = path));
-
+            BrowseDatabaseScriptCommand = new RelayCommand(() => BrowseSql(path => Config.DatabaseScriptPath = path));
+            BrowseResultsDirectoryCommand = new RelayCommand(BrowseResultsDirectory);
             _runCommand = new AsyncRelayCommand(RunGraderAsync, () => !IsRunning);
             _cancelCommand = new RelayCommand(Cancel, () => IsRunning);
 
@@ -56,10 +59,13 @@ namespace SolutionGrader.ViewModels
         public ICommand BrowseServerCommand { get; }
         public ICommand BrowseClientAppSettingsCommand { get; }
         public ICommand BrowseServerAppSettingsCommand { get; }
-        public ICommand BrowseTestCaseFileCommand { get; }
+        public ICommand BrowseSuiteFileCommand { get; }
+        public ICommand BrowseSuiteFolderCommand { get; }
         public ICommand BrowseIgnoreFileCommand { get; }
         public ICommand RunGraderCommand { get; }
         public ICommand CancelCommand { get; }
+        public ICommand BrowseDatabaseScriptCommand { get; }
+        public ICommand BrowseResultsDirectoryCommand { get; }
 
         public bool IsRunning
         {
@@ -80,63 +86,74 @@ namespace SolutionGrader.ViewModels
 
         private async Task RunGraderAsync()
         {
-            if (IsRunning)
-            {
-                return;
-            }
+            // Chặn re-entrancy (ấn nhiều lần / đổi test case khi đang chạy)
+            if (IsRunning) return;
 
             try
             {
                 IsRunning = true;
+                StatusMessage = "Starting grading...";
+
                 _cancellationTokenSource = new CancellationTokenSource();
 
+                // Tạo context theo ignore list
                 var ignoreList = LoadIgnoreList(Config.IgnoreFilePath);
                 var recorderContext = new GraderRecorderContext(ignoreList);
                 AttachRecorderContext(recorderContext);
 
-                var session = new GradingSession(Config, TestSteps, StudentOutputClient, StudentOutputServer, recorderContext);
+                var session = new GradingSession(
+                    Config,
+                    TestSteps,
+                    StudentOutputClient,
+                    StudentOutputServer,
+                    recorderContext);
+
                 var result = await session.RunAsync(_cancellationTokenSource.Token);
+
+                if (result.Cancelled)
+                {
+                    StatusMessage = "Grading cancelled by user.";
+                    GraderLogger.Info("Grading cancelled.");
+                    return; // KHÔNG hiện dialog
+                }
 
                 if (result.Success)
                 {
-                    var message = result.ExportPath != null
-                        ? $"Grading completed successfully.\nResult exported to:{Environment.NewLine}{result.ExportPath}"
-                        : "Grading completed successfully.";
-                    MessageBox.Show(message, "Solution Grader", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                else if (result.Cancelled)
-                {
-                    MessageBox.Show("Grading cancelled.", "Solution Grader", MessageBoxButton.OK, MessageBoxImage.Information);
+                    var msg = result.ExportPath != null
+                        ? $"Grading completed. Results at: {result.ExportPath}"
+                        : "Grading completed.";
+                    StatusMessage = msg;
+                    GraderLogger.Info(msg);
+                    // KHÔNG hiện dialog khi OK
                 }
                 else
                 {
-                    MessageBox.Show(result.Message, "Solution Grader", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    // Thất bại: ghi log + status, KHÔNG spam dialog
+                    StatusMessage = $"Grading failed: {result.Message}";
+                    GraderLogger.Warning(StatusMessage);
                 }
             }
             catch (OperationCanceledException)
             {
-                MessageBox.Show("Grading cancelled.", "Solution Grader", MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusMessage = "Grading cancelled.";
+                GraderLogger.Info("Grading cancelled (OperationCanceledException).");
             }
             catch (Exception ex)
             {
-                GraderLogger.Error("Unexpected error while running grader.", ex);
-                MessageBox.Show($"Grading failed: {ex.Message}", "Solution Grader", MessageBoxButton.OK, MessageBoxImage.Error);
+                StatusMessage = $"Grading failed: {ex.Message}";
+                GraderLogger.Error(StatusMessage, ex);
             }
             finally
             {
                 IsRunning = false;
-                _cancellationTokenSource?.Dispose();
-                _cancellationTokenSource = null;
+                _runCommand.RaiseCanExecuteChanged();
+                _cancelCommand.RaiseCanExecuteChanged();
             }
         }
 
         private void Cancel()
         {
-            if (!IsRunning)
-            {
-                return;
-            }
-
+            if (!IsRunning) return;
             _cancellationTokenSource?.Cancel();
         }
 
@@ -155,59 +172,36 @@ namespace SolutionGrader.ViewModels
 
         private void OnClientListChanged(object? sender, ListChangedEventArgs e)
         {
-            if (_recorderContext == null)
-            {
-                return;
-            }
-
+            if (_recorderContext == null) return;
             SyncList(_recorderContext.OutputClients, StudentOutputClient, e);
         }
 
         private void OnServerListChanged(object? sender, ListChangedEventArgs e)
         {
-            if (_recorderContext == null)
-            {
-                return;
-            }
-
+            if (_recorderContext == null) return;
             SyncList(_recorderContext.OutputServers, StudentOutputServer, e);
         }
 
-        private void SyncList<T>(BindingList<T> source, ObservableCollection<T> target, ListChangedEventArgs e)
+        private void SyncList<T>(System.ComponentModel.BindingList<T> source, ObservableCollection<T> target, ListChangedEventArgs e)
         {
             switch (e.ListChangedType)
             {
                 case ListChangedType.Reset:
                     target.Clear();
-                    foreach (var item in source)
-                    {
-                        target.Add(item);
-                    }
+                    foreach (var item in source) target.Add(item);
                     break;
                 case ListChangedType.ItemAdded:
-                    if (e.NewIndex >= 0 && e.NewIndex <= target.Count)
-                    {
-                        target.Insert(e.NewIndex, source[e.NewIndex]);
-                    }
+                    if (e.NewIndex >= 0 && e.NewIndex <= target.Count) target.Insert(e.NewIndex, source[e.NewIndex]);
                     break;
                 case ListChangedType.ItemChanged:
-                    if (e.NewIndex >= 0 && e.NewIndex < target.Count)
-                    {
-                        target[e.NewIndex] = source[e.NewIndex];
-                    }
+                    if (e.NewIndex >= 0 && e.NewIndex < target.Count) target[e.NewIndex] = source[e.NewIndex];
                     break;
                 case ListChangedType.ItemDeleted:
-                    if (e.NewIndex >= 0 && e.NewIndex < target.Count)
-                    {
-                        target.RemoveAt(e.NewIndex);
-                    }
+                    if (e.NewIndex >= 0 && e.NewIndex < target.Count) target.RemoveAt(e.NewIndex);
                     break;
                 default:
                     target.Clear();
-                    foreach (var item in source)
-                    {
-                        target.Add(item);
-                    }
+                    foreach (var item in source) target.Add(item);
                     break;
             }
         }
@@ -217,72 +211,95 @@ namespace SolutionGrader.ViewModels
             try
             {
                 if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-                {
                     return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                }
 
                 return IgnoreListLoader.IgnoreLoader(path);
             }
             catch (Exception ex)
             {
                 GraderLogger.Error("Failed to load ignore list.", ex);
-                MessageBox.Show($"Unable to load ignore list: {ex.Message}", "Solution Grader", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show($"Unable to load ignore list: {ex.Message}", "Solution Grader",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
                 return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
         }
 
-        private void BrowseClient()
-        {
-            BrowseExecutable(path => Config.ClientPath = path);
-        }
-
-        private void BrowseServer()
-        {
-            BrowseExecutable(path => Config.ServerPath = path);
-        }
+        private void BrowseClient() => BrowseExecutable(path => Config.ClientPath = path);
+        private void BrowseServer() => BrowseExecutable(path => Config.ServerPath = path);
 
         private void BrowseExecutable(Action<string> setter)
         {
-            var dialog = new OpenFileDialog
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
                 Filter = "Executable Files (*.exe)|*.exe|All Files (*.*)|*.*"
             };
-
-            if (dialog.ShowDialog() == true)
-            {
-                setter(dialog.FileName);
-            }
+            if (dialog.ShowDialog() == true) setter(dialog.FileName);
         }
 
         private void BrowseJson(Action<string> setter)
         {
-            var dialog = new OpenFileDialog
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
                 Filter = "JSON Files (*.json)|*.json|All Files (*.*)|*.*"
             };
-
-            if (dialog.ShowDialog() == true)
-            {
-                setter(dialog.FileName);
-            }
+            if (dialog.ShowDialog() == true) setter(dialog.FileName);
         }
 
         private void BrowseExcel(Action<string> setter)
         {
-            var dialog = new OpenFileDialog
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
                 Filter = "Excel Files (*.xlsx)|*.xlsx|All Files (*.*)|*.*"
             };
+            if (dialog.ShowDialog() == true) setter(dialog.FileName);
+        }
 
-            if (dialog.ShowDialog() == true)
+        private void BrowseSql(Action<string> setter)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
             {
-                setter(dialog.FileName);
+                Filter = "SQL Files (*.sql)|*.sql|All Files (*.*)|*.*"
+            };
+            if (dialog.ShowDialog() == true) setter(dialog.FileName);
+        }
+
+        private void BrowseSuiteFolder()
+        {
+            using var dialog = new Forms.FolderBrowserDialog
+            {
+                Description = "Select the folder that contains the test suite header.",
+                ShowNewFolderButton = false
+            };
+            if (dialog.ShowDialog() == Forms.DialogResult.OK)
+                Config.SuitePath = dialog.SelectedPath;
+        }
+
+        private void BrowseResultsDirectory()
+        {
+            using var dialog = new Forms.FolderBrowserDialog
+            {
+                Description = "Select the folder where grading results should be stored.",
+                ShowNewFolderButton = true
+            };
+            if (dialog.ShowDialog() == Forms.DialogResult.OK)
+                Config.ResultsDirectory = dialog.SelectedPath;
+        }
+
+        private void OnPropertyChanged(string propertyName) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        private string _statusMessage;
+        public string StatusMessage
+        {
+            get => _statusMessage;
+            set
+            {
+                if (_statusMessage != value)
+                {
+                    _statusMessage = value;
+                    OnPropertyChanged(nameof(StatusMessage));
+                }
             }
         }
 
-        private void OnPropertyChanged(string propertyName)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
     }
 }

@@ -12,11 +12,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
-using SolutionGrader.Legacy.Model;
-using SolutionGrader.Legacy.Recorder;
-using SolutionGrader.Legacy.Service;
-using SolutionGrader.Legacy.Views;
+// NOTE: do not import System.Windows.Forms; qualify WPF Application usage
 
 namespace SolutionGrader.Legacy.MiddlewareHandling
 {
@@ -66,10 +62,10 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
             {
                 if (!_isSessionRunning) return;
 
-                await Application.Current.Dispatcher.InvokeAsync(() =>
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     dialog = new ProgressDialog("Đang dừng Middleware Proxy...");
-                    dialog.Owner = Application.Current.MainWindow;
+                    dialog.Owner = System.Windows.Application.Current.MainWindow;
                     dialog.Show();
                 });
 
@@ -100,16 +96,14 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                     StatusCode = 0
                 });
 
-                await Application.Current.Dispatcher.InvokeAsync(() =>
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     dialog?.Close();
                 });
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"[MiddlewareStop ERR] {ex.Message}");
-
-                await Application.Current.Dispatcher.InvokeAsync(() =>
+                await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     dialog?.Close();
                 });
@@ -165,7 +159,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
             if (Recorder != null && Recorder.InputClients.Any())
             {
                 var stage = Recorder.InputClients.Last().Stage;
-                Application.Current.Dispatcher.Invoke(() =>
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
                     Recorder.OutputServers.Add(new OutputServer
                     {
@@ -195,7 +189,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                 if (Recorder != null && Recorder.InputClients.Any())
                 {
                     var stage = Recorder.InputClients.Last().Stage;
-                    await Application.Current.Dispatcher.InvokeAsync(() =>
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                     {
                         Recorder.OutputClients.Add(new OutputClient
                         {
@@ -308,7 +302,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                 if (Recorder != null && Recorder.InputClients.Any())
                 {
                     var stage = Recorder.InputClients.Last().Stage;
-                    await Application.Current.Dispatcher.InvokeAsync(() =>
+                    await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                     {
                         if (direction.Contains("Client"))
                         {
@@ -360,10 +354,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
             }
         }
 
-        private void AddRequestLog(LoggedRequest log)
-        {
-            AppendToFile(log);
-        }
+        private void AddRequestLog(LoggedRequest log) => AppendToFile(log);
 
         private void AppendToFile(LoggedRequest log)
         {
