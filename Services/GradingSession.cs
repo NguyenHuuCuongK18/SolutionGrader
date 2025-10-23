@@ -294,28 +294,57 @@ namespace SolutionGrader.Services
         {
             try
             {
-                switch (step.Action?.Trim().ToLowerInvariant())
+                var action = (step.Action ?? "").Trim().ToLowerInvariant();
+                bool useHttp = !string.Equals(_config.Protocol, "TCP", StringComparison.OrdinalIgnoreCase);
+
+                switch (action)
                 {
                     case "client input":
                         GraderLogger.Info($"Sending client input for stage {step.Stage}: {step.Input}");
                         _manager.SendClientInput(step.Input);
                         break;
+
                     case "clientclose":
                         GraderLogger.Info("Stopping client process as requested by test step.");
                         await _manager.StopClientAsync();
+                        // keep middleware behavior consistent with generator
+                        await _middleware.StopAsync();
                         break;
+
                     case "serverclose":
                         GraderLogger.Info("Stopping server process as requested by test step.");
                         await _manager.StopServerAsync();
+                        // keep middleware behavior consistent with generator
+                        await _middleware.StopAsync();
                         break;
+
+                    case "clientstart":
+                        // server may already be running or not; safe to start middleware redundantly
+                        if (!_manager.IsServerRunning)
+                        {
+                            GraderLogger.Info("Clientstart requested; ensuring server is running first.");
+                            _manager.StartServer();
+                        }
+                        await _middleware.StartAsync(useHttp);   // no-op if already running
+                        _manager.StartClient();
+                        break;
+
+                    case "serverstart":
+                        _manager.StartServer();
+                        await _middleware.StartAsync(useHttp);   // start (or keep) proxy with correct mode
+                        break;
+
                     default:
                         break;
                 }
             }
             catch (Exception ex)
             {
-                GraderLogger.Error($"Failed to execute action '{step.Action}' for stage {step.Stage}.", ex);
-                throw;
+                // Do NOT crash the session; record and continue
+                var msg = $"Failed to execute action '{step.Action}' for stage {step.Stage}: {ex.Message}";
+                GraderLogger.Error(msg, ex);
+                _currentCaseIssues.Add(msg);
+                // no rethrow
             }
         }
 
@@ -459,16 +488,16 @@ namespace SolutionGrader.Services
             issues.Add($"Stage {stage}: {field} expected '{expected}', actual '{actual}'.");
         }
 
-        private void CompareStatusCode(int expected, int actual, List<string> issues, int stage)
+        private void CompareStatusCode(string expected, string actual, List<string> issues, int stage)
         {
-            if (expected == 0 && actual == 0) return;
+            if (string.Equals(expected?.Trim(), actual?.Trim(), StringComparison.OrdinalIgnoreCase)) return;
             if (expected != actual)
                 issues.Add($"Stage {stage}: StatusCode expected {expected}, actual {actual}.");
         }
 
-        private void CompareByteSize(string scope, int expected, int actual, List<string> issues, int stage)
+        private void CompareByteSize(string scope, string expected, string actual, List<string> issues, int stage)
         {
-            if (expected == 0 && actual == 0) return;
+            if (string.Equals(expected?.Trim(), actual?.Trim(), StringComparison.OrdinalIgnoreCase)) return;
             if (expected != actual)
                 issues.Add($"Stage {stage}: {scope} byte size expected {expected}, actual {actual}.");
         }
@@ -505,8 +534,8 @@ namespace SolutionGrader.Services
                      && string.IsNullOrWhiteSpace(client.DataResponse)
                      && string.IsNullOrWhiteSpace(client.Output)
                      && string.IsNullOrWhiteSpace(client.DataTypeMiddleWare)
-                     && client.StatusCode == 0
-                     && client.ByteSize == 0);
+                     && client.StatusCode == null
+                     && client.ByteSize == null);
         }
 
         private bool HasMeaningfulServerExpectation(OutputServer? server)
@@ -517,7 +546,7 @@ namespace SolutionGrader.Services
                      && string.IsNullOrWhiteSpace(server.DataRequest)
                      && string.IsNullOrWhiteSpace(server.Output)
                      && string.IsNullOrWhiteSpace(server.DataTypeMiddleware)
-                     && server.ByteSize == 0);
+                     && server.ByteSize == null);
         }
 
         // Export results for a specific case into resultsRoot/TestCase/graderesult.xlsx
@@ -594,13 +623,30 @@ namespace SolutionGrader.Services
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
 
-            using var stream = File.OpenRead(path);
-            using var document = JsonDocument.Parse(stream);
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var document = JsonDocument.Parse(stream, new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
 
-            if (!document.RootElement.TryGetProperty("ConnectionStrings", out var connectionStrings)) return null;
-            if (!connectionStrings.TryGetProperty(key, out var value)) return null;
+                if (!document.RootElement.TryGetProperty("ConnectionStrings", out var connectionStrings)) return null;
+                if (!connectionStrings.TryGetProperty(key, out var value)) return null;
 
-            return value.GetString();
+                return value.GetString();
+            }
+            catch (JsonException ex)
+            {
+                GraderLogger.Warning($"Unable to parse JSON configuration file '{path}': {ex.Message}");
+                return null;
+            }
+            catch (IOException ex)
+            {
+                GraderLogger.Warning($"Unable to read configuration file '{path}': {ex.Message}");
+                return null;
+            }
         }
 
         private string PrepareResultsRoot(TestSuiteDefinition suite)

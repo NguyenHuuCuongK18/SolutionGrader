@@ -7,7 +7,7 @@
         public string DataRequest { get; set; } = string.Empty;
         public string Output { get; set; } = string.Empty;
         public string DataTypeMiddleware { get; set; } = string.Empty;
-        public int ByteSize { get; set; }
+        public string ByteSize { get; set; } = string.Empty;
 
     }
 }

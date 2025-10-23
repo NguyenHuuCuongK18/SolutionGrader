@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace SolutionGrader.Legacy.Service
@@ -127,7 +128,7 @@ namespace SolutionGrader.Legacy.Service
                 return string.Empty;
 
             // 1️⃣ Unescape Unicode (\u0027 -> ')
-            string unescaped = System.Text.RegularExpressions.Regex.Unescape(input);
+            string unescaped = SafeUnescapeUnicode(input);
 
             // 2️⃣ Normalize smart quotes and dashes
             unescaped = unescaped
@@ -157,6 +158,18 @@ namespace SolutionGrader.Legacy.Service
             unescaped = System.Text.RegularExpressions.Regex.Replace(unescaped, @"\s+", " ");
 
             return unescaped.Trim();
+        }
+        // Add this helper in the same class:
+        private static string SafeUnescapeUnicode(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+
+            // Convert ONLY \uXXXX -> char; leave \U, \n, others as-is (we don't want regex or C#-string unescape semantics here)
+            return Regex.Replace(s, @"\\u([0-9a-fA-F]{4})", m =>
+            {
+                var code = Convert.ToInt32(m.Groups[1].Value, 16);
+                return char.ConvertFromUtf32(code);
+            });
         }
 
     }

@@ -97,10 +97,10 @@ namespace SolutionGrader.Services
                     Stage = stage,
                     Method = sheet.Cells[row, 2].Text?.Trim() ?? string.Empty,
                     DataResponse = sheet.Cells[row, 3].Text ?? string.Empty,
-                    StatusCode = TryParseInt(sheet.Cells[row, 4].Text),
+                    StatusCode = sheet.Cells[row, 4].Text,
                     Output = sheet.Cells[row, 5].Text ?? string.Empty,
                     DataTypeMiddleWare = sheet.Cells[row, 6].Text?.Trim() ?? string.Empty,
-                    ByteSize = TryParseInt(sheet.Cells[row, 7].Text)
+                    ByteSize = sheet.Cells[row, 7].Text
                 };
 
                 data.ExpectedClients[stage] = client;
@@ -130,7 +130,7 @@ namespace SolutionGrader.Services
                     DataRequest = sheet.Cells[row, 3].Text ?? string.Empty,
                     Output = sheet.Cells[row, 4].Text ?? string.Empty,
                     DataTypeMiddleware = sheet.Cells[row, 5].Text?.Trim() ?? string.Empty,
-                    ByteSize = TryParseInt(sheet.Cells[row, 6].Text)
+                    ByteSize = sheet.Cells[row, 6].Text
                 };
 
                 data.ExpectedServers[stage] = server;

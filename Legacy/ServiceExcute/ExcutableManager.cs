@@ -32,17 +32,10 @@ namespace SolutionGrader.Legacy.ServiceExcute
 
         public void Init(string clientPath, string serverPath)
         {
-            _clientProcess = CreateProcess(clientPath, msg =>
-            {
-                ClientOutputReceived?.Invoke(msg);
-                AppendDebugFile("client.log", msg);
-            }, "Client");
-
-            _serverProcess = CreateProcess(serverPath, msg =>
-            {
-                ServerOutputReceived?.Invoke(msg);
-                AppendDebugFile("server.log", msg);
-            }, "Server");
+            _pendingClientPath = clientPath;
+            _pendingServerPath = serverPath;
+            InitClient(clientPath);
+            InitServer(serverPath);
         }
 
         private Process CreateProcess(string exePath, Action<string> onOutput, string role)
@@ -72,19 +65,53 @@ namespace SolutionGrader.Legacy.ServiceExcute
 
         #region Start/Stop (foreground-less)
 
+        // ExecutableManager.cs  (additions)
+        public void InitClient(string clientPath)
+        {
+            _clientProcess = CreateProcess(clientPath, msg =>
+            {
+                ClientOutputReceived?.Invoke(msg);
+                AppendDebugFile("client.log", msg);
+            }, "Client");
+        }
+
+        public void InitServer(string serverPath)
+        {
+            _serverProcess = CreateProcess(serverPath, msg =>
+            {
+                ServerOutputReceived?.Invoke(msg);
+                AppendDebugFile("server.log", msg);
+            }, "Server");
+        }
+
         public void StartServer()
         {
             if (_serverProcess == null)
-                throw new InvalidOperationException("Server process not initialized.");
-            StartProcessAndMonitor(_serverProcess, msg => ServerOutputReceived?.Invoke(msg), "server.log");
+            {
+                if (string.IsNullOrWhiteSpace(_pendingServerPath))
+                    throw new InvalidOperationException("Server process not initialized.");
+                InitServer(_pendingServerPath);
+            }
+            StartProcessAndMonitor(_serverProcess!, msg => ServerOutputReceived?.Invoke(msg), "server.log");
         }
 
         public void StartClient()
         {
             if (_clientProcess == null)
-                throw new InvalidOperationException("Client process not initialized.");
-            StartProcessAndMonitor(_clientProcess, msg => ClientOutputReceived?.Invoke(msg), "client.log");
+            {
+                if (string.IsNullOrWhiteSpace(_pendingClientPath))
+                    throw new InvalidOperationException("Client process not initialized.");
+                InitClient(_pendingClientPath);
+            }
+            StartProcessAndMonitor(_clientProcess!, msg => ClientOutputReceived?.Invoke(msg), "client.log");
         }
+
+        // store paths captured during Init so we can reinit later
+        private string? _pendingClientPath;
+        private string? _pendingServerPath;
+
+
+
 
         public void StartBoth()
         {

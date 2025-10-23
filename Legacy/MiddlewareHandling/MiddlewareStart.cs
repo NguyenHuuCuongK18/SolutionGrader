@@ -166,7 +166,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                         Stage = stage,
                         Method = request.HttpMethod,
                         DataTypeMiddleware = requestDataType,
-                        ByteSize = requestBytes.Length,
+                        ByteSize = requestBytes.Length.ToString(),
                         DataRequest = requestBody,
                     });
                 });
@@ -196,8 +196,8 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                             Stage = stage,
                             Method = request.HttpMethod,
                             DataTypeMiddleWare = responseDataType,
-                            ByteSize = responseBytes.Length,
-                            StatusCode = (int)responseMessage.StatusCode,
+                            ByteSize = responseBytes.Length.ToString(),
+                            StatusCode = responseMessage.StatusCode.ToString(),
                             DataResponse = responseBody,
                         });
                     });
@@ -322,7 +322,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                                     Method = "TCP",
                                     DataRequest = data,
                                     DataTypeMiddleware = dataType,
-                                    ByteSize = byteSize
+                                    ByteSize = byteSize.ToString()
                                 });
                             }
                         }
@@ -345,7 +345,7 @@ namespace SolutionGrader.Legacy.MiddlewareHandling
                                     Method = "TCP",
                                     DataResponse = data,
                                     DataTypeMiddleWare = dataType,
-                                    ByteSize = byteSize
+                                    ByteSize = byteSize.ToString()
                                 });
                             }
                         }
